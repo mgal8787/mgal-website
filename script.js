@@ -5,17 +5,16 @@ let w, h, cx;
 let horizonY = 0;
 
 const RED = [214, 24, 38];
-const RED_BRIGHT = [255, 70, 90];
 const CORE = [255, 236, 228];
 
-// Fraction of each source image's own height where its horizon/vanishing
-// point sits — used to line everything up after a cover-fit scale.
+// Fraction of the background image's own height where its horizon/
+// vanishing point sits — used to line everything up after cover-fit.
 const BG_HORIZON_FRAC = 0.545;
 
 // ---------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------
-const assets = { bg: null, logo: null, globe: null };
+const assets = { bg: null, logo: null };
 let assetsReady = false;
 
 function loadImage(src) {
@@ -30,11 +29,9 @@ function loadImage(src) {
 Promise.all([
   loadImage('img/bg-scene.jpg'),
   loadImage('img/logo-chrome.png'),
-  loadImage('img/globe.png'),
-]).then(([bg, logo, globe]) => {
+]).then(([bg, logo]) => {
   assets.bg = bg;
   assets.logo = logo;
-  assets.globe = globe;
   assetsReady = true;
   layout();
 });
@@ -43,8 +40,7 @@ Promise.all([
 // Layout (recomputed on resize once assets are known)
 // ---------------------------------------------------------------
 let bgDraw = { x: 0, y: 0, w: 0, h: 0 };
-let logoDraw = { x: 0, y: 0, w: 0, h: 0 };
-let globeDraw = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0 };
+let logoDraw = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0 };
 
 function coverFit(iw, ih, cw, ch) {
   const scale = Math.max(cw / iw, ch / ih);
@@ -59,26 +55,14 @@ function layout() {
   horizonY = bgDraw.y + assets.bg.height * BG_HORIZON_FRAC * bgDraw.scale;
 
   if (assets.logo) {
-    const logoW = Math.min(w * 0.72, assets.logo.width * 1.0);
+    const logoW = Math.min(w * 0.7, assets.logo.width);
     const logoScale = logoW / assets.logo.width;
     const logoH = assets.logo.height * logoScale;
     logoDraw = {
-      x: cx - logoW / 2,
-      y: horizonY - logoH * 0.62,
       w: logoW,
       h: logoH,
-    };
-  }
-
-  if (assets.globe) {
-    const gw = Math.min(w * 0.46, assets.globe.width * 1.3);
-    const gScale = gw / assets.globe.width;
-    const gh = assets.globe.height * gScale;
-    globeDraw = {
-      w: gw,
-      h: gh,
       cx: cx,
-      cy: horizonY - gh * 0.42,
+      cy: horizonY - logoH * 0.95,
     };
   }
 }
@@ -88,6 +72,7 @@ function resize() {
   h = canvas.height = window.innerHeight;
   cx = w / 2;
   layout();
+  buildSparkles();
 }
 window.addEventListener('resize', resize);
 
@@ -98,8 +83,7 @@ window.addEventListener('resize', resize);
 let logoCanvas = null, logoCtx = null;
 
 function ensureLogoCanvas() {
-  if (!assets.logo) return;
-  if (logoCanvas) return;
+  if (!assets.logo || logoCanvas) return;
   logoCanvas = document.createElement('canvas');
   logoCanvas.width = assets.logo.width;
   logoCanvas.height = assets.logo.height;
@@ -125,42 +109,54 @@ function renderLogo(now) {
   lctx.restore();
 }
 
-// ---------------------------------------------------------------
-// Scene canvas: globe + logo rendered once per frame, upright, so it
-// can also be blitted flipped as a floor reflection
-// ---------------------------------------------------------------
-let sceneCanvas, sctx;
+// entrance: the logo flies in from depth (small, near the horizon's
+// vanishing point) and settles into its final place
+let logoIntroStart = null;
+const LOGO_INTRO_MS = 1700;
 
-function drawSceneLayer(c, now) {
-  if (assets.globe) {
-    // fake a turntable spin around the vertical axis: squash the image
-    // horizontally toward an edge-on sliver and back, instead of
-    // rotating it in-plane (which just looks like a flat disc spinning)
-    const spin = Math.cos(now * 0.00035);
-    c.save();
-    c.translate(globeDraw.cx, globeDraw.cy);
-    c.scale(spin, 1);
-    c.globalCompositeOperation = 'lighten';
-    c.drawImage(assets.globe, -globeDraw.w / 2, -globeDraw.h / 2, globeDraw.w, globeDraw.h);
-    c.restore();
-  }
+function easeOutCubic(x) {
+  return 1 - Math.pow(1 - x, 3);
+}
 
-  if (assets.logo) {
-    ensureLogoCanvas();
-    renderLogo(now);
-    c.save();
-    c.shadowBlur = 45;
-    c.shadowColor = `rgba(${RED[0]},${RED[1]},${RED[2]},0.8)`;
-    c.drawImage(logoCanvas, logoDraw.x, logoDraw.y, logoDraw.w, logoDraw.h);
-    c.shadowBlur = 0;
-    c.restore();
-  }
+function drawLogo(c, now) {
+  if (!assets.logo) return;
+  ensureLogoCanvas();
+  renderLogo(now);
+
+  if (logoIntroStart === null) logoIntroStart = now;
+  const p = easeOutCubic(Math.min(1, (now - logoIntroStart) / LOGO_INTRO_MS));
+  const scale = 0.08 + 0.92 * p;
+  const x = cx + (logoDraw.cx - cx) * p;
+  const y = horizonY + (logoDraw.cy - horizonY) * p;
+  const opacity = Math.min(1, p / 0.3);
+
+  c.save();
+  c.globalAlpha = opacity;
+  c.translate(x, y);
+  c.scale(scale, scale);
+  c.shadowBlur = 45;
+  c.shadowColor = `rgba(${RED[0]},${RED[1]},${RED[2]},0.8)`;
+  c.drawImage(logoCanvas, -logoDraw.w / 2, -logoDraw.h / 2, logoDraw.w, logoDraw.h);
+  c.shadowBlur = 0;
+  c.restore();
 }
 
 // ---------------------------------------------------------------
-// Stars / sparkle on top of the photo background for extra life
+// Background: slow Ken Burns drift + sparkle stars + occasional flash
 // ---------------------------------------------------------------
+function drawBackground(now) {
+  const zoom = 1 + 0.035 * (0.5 + 0.5 * Math.sin(now * 0.00006));
+  const panX = Math.sin(now * 0.00004) * w * 0.015;
+  const panY = Math.cos(now * 0.00005) * h * 0.01;
+
+  const dw = bgDraw.w * zoom, dh = bgDraw.h * zoom;
+  const dx = bgDraw.x - (dw - bgDraw.w) / 2 + panX;
+  const dy = bgDraw.y - (dh - bgDraw.h) / 2 + panY;
+  ctx.drawImage(assets.bg, dx, dy, dw, dh);
+}
+
 let sparkles = [];
+let heroStars = [];
 
 function buildSparkles() {
   sparkles = [];
@@ -174,6 +170,18 @@ function buildSparkles() {
       speed: 0.4 + Math.random() * 1.2,
     });
   }
+
+  heroStars = [];
+  const heroCount = 2 + Math.floor(Math.random() * 2); // 2-3
+  for (let i = 0; i < heroCount; i++) {
+    heroStars.push({
+      x: w * (0.15 + Math.random() * 0.7),
+      y: horizonY * (0.12 + Math.random() * 0.55),
+      r: 2.2 + Math.random() * 1.4,
+      phase: Math.random() * Math.PI * 2,
+      period: 2600 + Math.random() * 1800,
+    });
+  }
 }
 
 function drawSparkles(now) {
@@ -185,6 +193,107 @@ function drawSparkles(now) {
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
     ctx.fill();
   });
+
+  heroStars.forEach(s => {
+    const tw = 0.4 + 0.6 * Math.sin((now / s.period) * Math.PI * 2 + s.phase);
+    const a = Math.max(0, tw);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = 'rgba(255,255,255,0.95)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1;
+    const len = s.r * 5;
+    ctx.beginPath();
+    ctx.moveTo(s.x - len, s.y);
+    ctx.lineTo(s.x + len, s.y);
+    ctx.moveTo(s.x, s.y - len);
+    ctx.lineTo(s.x, s.y + len);
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+// occasional small lightning flash somewhere in the sky
+let nextFlashAt = 4000 + Math.random() * 5000;
+let flash = null;
+
+function buildFlashPath() {
+  const x0 = w * (0.1 + Math.random() * 0.8);
+  const y0 = horizonY * (0.05 + Math.random() * 0.3);
+  const pts = [[x0, y0]];
+  let x = x0, y = y0;
+  const segs = 4 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < segs; i++) {
+    x += (Math.random() - 0.5) * 36;
+    y += 14 + Math.random() * 22;
+    pts.push([x, y]);
+  }
+  return pts;
+}
+
+function drawFlash(now) {
+  if (!flash && now >= nextFlashAt) {
+    flash = { start: now, duration: 220 + Math.random() * 120, path: buildFlashPath() };
+    nextFlashAt = now + 5000 + Math.random() * 9000;
+  }
+  if (!flash) return;
+
+  const t = now - flash.start;
+  if (t > flash.duration) { flash = null; return; }
+  const flicker = Math.random() > 0.3 ? 1 : 0.2;
+  const fade = 1 - t / flash.duration;
+
+  ctx.save();
+  ctx.globalAlpha = fade * flicker;
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = 'rgba(255,255,255,1)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  flash.path.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------
+// Occasional vertical light sweep down the floor, same idea as the
+// specular highlight on the logo
+// ---------------------------------------------------------------
+let nextFloorSweepAt = 3000 + Math.random() * 4000;
+let floorSweep = null;
+
+function drawFloorSweep(now) {
+  if (!floorSweep && now >= nextFloorSweepAt) {
+    floorSweep = { start: now, duration: 1100 + Math.random() * 500 };
+    nextFloorSweepAt = now + 6000 + Math.random() * 9000;
+  }
+  if (!floorSweep) return;
+
+  const t = now - floorSweep.start;
+  if (t > floorSweep.duration) { floorSweep = null; return; }
+
+  const floorH = h - horizonY;
+  const prog = t / floorSweep.duration;
+  const bandY = horizonY + prog * floorH;
+  const bandHeight = floorH * 0.22;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, horizonY, w, floorH);
+  ctx.clip();
+  ctx.globalCompositeOperation = 'lighten';
+  const grad = ctx.createLinearGradient(0, bandY - bandHeight, 0, bandY + bandHeight);
+  grad.addColorStop(0, 'rgba(255,235,228,0)');
+  grad.addColorStop(0.5, 'rgba(255,235,228,0.8)');
+  grad.addColorStop(1, 'rgba(255,235,228,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, bandY - bandHeight, w, bandHeight * 2);
+  ctx.restore();
 }
 
 // ---------------------------------------------------------------
@@ -194,7 +303,6 @@ let pulses = [];
 let nextPulseAt = 0;
 
 function pulseTargetX(seed) {
-  // spread targets across the lower edge, biased away from dead-center
   return cx + (seed - 0.5) * w * 1.6;
 }
 
@@ -202,9 +310,9 @@ function drawPulses(now) {
   if (now >= nextPulseAt) {
     const n = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < n; i++) {
-      pulses.push({ seed: Math.random(), start: now, duration: 900 + Math.random() * 700 });
+      pulses.push({ seed: Math.random(), start: now, duration: 1600 + Math.random() * 1000 });
     }
-    nextPulseAt = now + 220 + Math.random() * 380;
+    nextPulseAt = now + 350 + Math.random() * 450;
   }
 
   pulses = pulses.filter(p => now - p.start < p.duration);
@@ -220,7 +328,7 @@ function drawPulses(now) {
     ctx.shadowColor = `rgba(${CORE[0]},${CORE[1]},${CORE[2]},${alpha})`;
     ctx.fillStyle = `rgba(${CORE[0]},${CORE[1]},${CORE[2]},${alpha})`;
     ctx.beginPath();
-    ctx.arc(px, py, 2.6 + ease * 3, 0, Math.PI * 2);
+    ctx.arc(px, py, 2.4 + ease * 2.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   });
@@ -229,7 +337,7 @@ function drawPulses(now) {
 // ---------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------
-let introStart = null;
+let sceneCanvas, sctx;
 
 function frame(now) {
   now = now || 0;
@@ -241,16 +349,15 @@ function frame(now) {
       sceneCanvas.width = w;
       sceneCanvas.height = h;
       sctx = sceneCanvas.getContext('2d');
-      buildSparkles();
     }
 
-    ctx.drawImage(assets.bg, bgDraw.x, bgDraw.y, bgDraw.w, bgDraw.h);
+    drawBackground(now);
     drawSparkles(now);
+    drawFlash(now);
 
     sctx.clearRect(0, 0, w, h);
-    drawSceneLayer(sctx, now);
+    drawLogo(sctx, now);
 
-    // floor reflection of the globe + logo, flipped and faded
     const floorH = h - horizonY;
     if (floorH > 0) {
       ctx.save();
@@ -272,14 +379,8 @@ function frame(now) {
     }
 
     drawPulses(now);
+    drawFloorSweep(now);
     ctx.drawImage(sceneCanvas, 0, 0);
-  }
-
-  if (introStart === null) introStart = now;
-  const introP = Math.min(1, (now - introStart) / 1300);
-  if (introP < 1) {
-    ctx.fillStyle = `rgba(0,0,0,${1 - introP})`;
-    ctx.fillRect(0, 0, w, h);
   }
 
   requestAnimationFrame(frame);
