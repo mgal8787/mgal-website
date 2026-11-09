@@ -133,9 +133,13 @@ let sceneCanvas, sctx;
 
 function drawSceneLayer(c, now) {
   if (assets.globe) {
+    // fake a turntable spin around the vertical axis: squash the image
+    // horizontally toward an edge-on sliver and back, instead of
+    // rotating it in-plane (which just looks like a flat disc spinning)
+    const spin = Math.cos(now * 0.00035);
     c.save();
     c.translate(globeDraw.cx, globeDraw.cy);
-    c.rotate(now * 0.00012);
+    c.scale(spin, 1);
     c.globalCompositeOperation = 'lighten';
     c.drawImage(assets.globe, -globeDraw.w / 2, -globeDraw.h / 2, globeDraw.w, globeDraw.h);
     c.restore();
