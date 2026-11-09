@@ -110,12 +110,15 @@ function renderLogo(now) {
 }
 
 // entrance: the logo flies in from depth (small, near the horizon's
-// vanishing point) and settles into its final place
+// vanishing point), overshoots a little past its final size/position,
+// then settles back — like it arrives too close and eases back into place
 let logoIntroStart = null;
-const LOGO_INTRO_MS = 3600;
+const LOGO_INTRO_MS = 5200;
 
-function easeOutCubic(x) {
-  return 1 - Math.pow(1 - x, 3);
+function easeOutBack(x) {
+  const c1 = 1.25;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 }
 
 function drawLogo(c, now) {
@@ -124,11 +127,12 @@ function drawLogo(c, now) {
   renderLogo(now);
 
   if (logoIntroStart === null) logoIntroStart = now;
-  const p = easeOutCubic(Math.min(1, (now - logoIntroStart) / LOGO_INTRO_MS));
+  const rawP = Math.min(1, (now - logoIntroStart) / LOGO_INTRO_MS);
+  const p = easeOutBack(rawP);
   const scale = 0.08 + 0.92 * p;
   const x = cx + (logoDraw.cx - cx) * p;
   const y = horizonY + (logoDraw.cy - horizonY) * p;
-  const opacity = Math.min(1, p / 0.3);
+  const opacity = Math.min(1, rawP / 0.2);
 
   c.save();
   c.globalAlpha = opacity;
@@ -218,9 +222,10 @@ function drawSparkles(now) {
   });
 }
 
-// occasional small lightning flash somewhere in the sky
-let nextFlashAt = 1500 + Math.random() * 2000;
-let flash = null;
+// occasional small lightning flashes scattered around the sky — several
+// can be alive at once for a busier effect
+let nextFlashAt = 600 + Math.random() * 900;
+let flashes = [];
 
 function buildFlashPath() {
   const x0 = w * (0.1 + Math.random() * 0.8);
@@ -237,27 +242,31 @@ function buildFlashPath() {
 }
 
 function drawFlash(now) {
-  if (!flash && now >= nextFlashAt) {
-    flash = { start: now, duration: 220 + Math.random() * 120, path: buildFlashPath() };
-    nextFlashAt = now + 1500 + Math.random() * 3000;
+  if (now >= nextFlashAt && flashes.length < 3) {
+    const n = 1 + (Math.random() > 0.6 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      flashes.push({ start: now, duration: 220 + Math.random() * 120, path: buildFlashPath() });
+    }
+    nextFlashAt = now + 500 + Math.random() * 1100;
   }
-  if (!flash) return;
 
-  const t = now - flash.start;
-  if (t > flash.duration) { flash = null; return; }
-  const flicker = Math.random() > 0.3 ? 1 : 0.2;
-  const fade = 1 - t / flash.duration;
+  flashes = flashes.filter(f => now - f.start < f.duration);
+  flashes.forEach(f => {
+    const t = now - f.start;
+    const flicker = Math.random() > 0.3 ? 1 : 0.2;
+    const fade = 1 - t / f.duration;
 
-  ctx.save();
-  ctx.globalAlpha = fade * flicker;
-  ctx.shadowBlur = 16;
-  ctx.shadowColor = 'rgba(255,255,255,1)';
-  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  flash.path.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-  ctx.stroke();
-  ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = fade * flicker;
+    ctx.shadowBlur = 16;
+    ctx.shadowColor = 'rgba(255,255,255,1)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    f.path.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.stroke();
+    ctx.restore();
+  });
 }
 
 // ---------------------------------------------------------------
