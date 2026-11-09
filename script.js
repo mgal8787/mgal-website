@@ -219,7 +219,7 @@ function drawSparkles(now) {
 }
 
 // occasional small lightning flash somewhere in the sky
-let nextFlashAt = 4000 + Math.random() * 5000;
+let nextFlashAt = 1500 + Math.random() * 2000;
 let flash = null;
 
 function buildFlashPath() {
@@ -239,7 +239,7 @@ function buildFlashPath() {
 function drawFlash(now) {
   if (!flash && now >= nextFlashAt) {
     flash = { start: now, duration: 220 + Math.random() * 120, path: buildFlashPath() };
-    nextFlashAt = now + 5000 + Math.random() * 9000;
+    nextFlashAt = now + 1500 + Math.random() * 3000;
   }
   if (!flash) return;
 
@@ -357,26 +357,6 @@ function frame(now) {
 
     sctx.clearRect(0, 0, w, h);
     drawLogo(sctx, now);
-
-    const floorH = h - horizonY;
-    if (floorH > 0) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, horizonY, w, floorH);
-      ctx.clip();
-      ctx.globalAlpha = 0.3;
-      ctx.translate(0, horizonY * 2);
-      ctx.scale(1, -1);
-      ctx.drawImage(sceneCanvas, 0, 0);
-      ctx.restore();
-
-      const fade = ctx.createLinearGradient(0, horizonY, 0, h);
-      fade.addColorStop(0, 'rgba(4,2,2,0)');
-      fade.addColorStop(0.6, 'rgba(4,2,2,0.45)');
-      fade.addColorStop(1, 'rgba(4,2,2,0.85)');
-      ctx.fillStyle = fade;
-      ctx.fillRect(0, horizonY, w, floorH);
-    }
 
     drawPulses(now);
     drawFloorSweep(now);
