@@ -112,7 +112,7 @@ function renderLogo(now) {
 // entrance: the logo flies in from depth (small, near the horizon's
 // vanishing point) and settles into its final place
 let logoIntroStart = null;
-const LOGO_INTRO_MS = 1700;
+const LOGO_INTRO_MS = 3600;
 
 function easeOutCubic(x) {
   return 1 - Math.pow(1 - x, 3);
