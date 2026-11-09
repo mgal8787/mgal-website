@@ -55,15 +55,16 @@ function layout() {
   horizonY = bgDraw.y + assets.bg.height * BG_HORIZON_FRAC * bgDraw.scale;
 
   if (assets.logo) {
-    const logoW = Math.min(w * 0.7, assets.logo.width);
-    const logoScale = logoW / assets.logo.width;
-    const logoH = assets.logo.height * logoScale;
-    logoDraw = {
-      w: logoW,
-      h: logoH,
-      cx: cx,
-      cy: horizonY - logoH * 0.95,
-    };
+    const aspect = assets.logo.height / assets.logo.width;
+    // cap by available width, native size, AND the vertical room actually
+    // available above the horizon — a wide/short window has plenty of
+    // width but very little height, so width alone isn't enough
+    const topMargin = 24;
+    const maxWByHeight = ((horizonY - topMargin) * 0.78) / aspect;
+    const logoW = Math.max(120, Math.min(w * 0.7, assets.logo.width, maxWByHeight));
+    const logoH = logoW * aspect;
+    const cy = Math.max(horizonY - logoH * 0.95, logoH / 2 + topMargin);
+    logoDraw = { w: logoW, h: logoH, cx: cx, cy };
   }
 }
 
